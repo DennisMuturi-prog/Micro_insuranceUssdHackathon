@@ -53,5 +53,42 @@ async function checkUserClaims(phoneNumber,claimType){
     }
 
 }
+async function checkAllUserClaims(phoneNumber){
+    try {
+        await client.connect();
+        const claims=await client.db("Insurance").collection('claims').find({phoneNumber:phoneNumber}).toArray();
+        if(claims.length){
+            return claims;
+        }
+        else{
+            return false;
+        }
+        
+    } catch (error) {
+        console.log(error);   
+    }
 
-module.exports={registerCustomer,checkIfUserExists,checkUserClaims}
+}
+async function authenticateUser(phoneNumber,pin){
+    try {
+        await client.connect();
+        const user=await client.db("Insurance").collection('customers').find({phoneNumber:phoneNumber}).toArray();
+        if(user.length){
+          const match=await bcrypt.compare(pin,user[0].pin);
+          if(match){
+            console.log('successfully authenticated');
+            return true;
+          }
+            return false;
+        }
+        else{
+            return false;
+        }
+        
+    } catch (error) {
+        console.log(error);   
+    }
+
+}
+
+module.exports={registerCustomer,checkIfUserExists,checkUserClaims,authenticateUser,checkAllUserClaims}
