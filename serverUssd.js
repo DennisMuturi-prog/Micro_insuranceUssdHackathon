@@ -1,8 +1,11 @@
 const express=require('express');
 const bodyParser=require('body-parser');
-const {registerCustomer,checkIfUserExists,checkUserClaims}=require('./database');
+const {registerCustomer,checkIfUserExists,checkUserClaims,authenticateUser}=require('./database');
+const {validateData}=require('./validateData');
+const {insertClaimsIntoDatabaseWithCredentials}=require('./fakeData');
+const {tiers}=require('./tiers');
 const {sendMessage}=require('./smsServer');
-const claims=['Claims','Hospitalization','Outpatient','Prescription Medication','Emergency Room Claim','Maternity and New Born Claim'];
+const claims=['Claims','Hospitalization','Outpatient','Prescription Medication','Emergency Room','Maternity and New Born'];
 const app=express();
 function checkHowManyStars(text){
     return (text.match(/\*/g) || []).length;
@@ -89,11 +92,133 @@ app.post('/ussd',async (req,res)=>{
         else if(/^2\*\d\*2\*\d+\*\d+$/.test(text)){
             response='CON Enter Hospital name'
         }
-        else if(/^2\*\d\*2\*\d+\*\d+\*\w+$/.test(text)){
+        else if(/^2\*\d\*2\*\d+\*\d+\*[\w\s]+$/.test(text)){
             response='CON Enter your 4 digit pin'
-            console.log(response);
         }
-        else if(/^2\*\d\*2\*\d+\*\d+\*\w+\*\d+$/.test(text)){ 
+        else if(/^2\*\d\*2\*\d+\*\d+\*[\w\s]+\*\d+$/.test(text)){ 
+            const [appMenu1,claimType,appMenu2,policyNumber,billingAmount,hospitalName,pin]=text.split('*');
+            const authenticated=await authenticateUser(phoneNumber,pin);
+            if(pin.toString().length!=4){
+                return res.set('Content-Type:text/plain').send('END Your pin should have 4 digits');
+            }
+            if(authenticated){
+                insertClaimsIntoDatabaseWithCredentials(Number(policyNumber),Number(billingAmount),hospitalName,phoneNumber,claims[claimType]);
+                response=`END Successfully added claim,we will notify you after screening process.
+                Policy Number:${policyNumber}
+                Billing Amount:${billingAmount}
+                HospitalName:${hospitalName}
+                Claim Type:${claims[claimType]}`
+                const smsResponse=`Successfully added claim,we will notify you after screening process.
+                Policy Number:${policyNumber}
+                Billing Amount:${billingAmount}
+                HospitalName:${hospitalName}
+                Claim Type:${claims[claimType]}`;
+                sendMessage(phoneNumber,smsResponse);
+
+            }
+            else{
+                response='END Wrong Pin'
+            }
+        }
+        else if(text=='4'){
+            response=`CON Insurance Products
+            1.Individual Health Insurance
+            2.Family Health Insurance
+            3.Health Savings Account
+            4.Medicare
+            5.Catastrophic Health Insurance`
+        }
+        else if(text=='4*1'){
+            response=`CON This plan provides 5 tiers.Choose one:
+            1.Tier 1-Preventive Care:
+            2.Tier 2_Basic Services
+            3.Tier 3-Specialized Services
+            4.Tier 4-Hospitalization and Surgery
+            5.Tier 5-Advanced and Specialty Care
+            6.Tier 6-Complex Procedures`
+        }
+        else if(/^4\*1\*\d$/.test(text)){
+            const [appmenu1,appmenu2,tier]=text.split('*');
+            response=`CON Insurance Plan
+            ${tiers[tier]}
+            1.Enroll`
+        }
+        else if(/^4\*1\*\d\*1$/.test(text)){
+            response=`CON Enter Full Name
+            Example:John Doe`  
+        }
+        else if(/^4\*1\*\d\*1\*[\w\s]+$/.test(text)){
+            response=`CON Enter Date Of Birth
+            Example:dd-mm-yyyy.eg 10-12-2024`
+        }
+        else if(/^4\*1\*\d\*1\*[\w\s]+\*\d{2}-\d{2}-\d{4}$/.test(text)){
+            response=`CON Choose Gender
+            1.Male
+            2.Female`
+        }
+        else if(/^4\*1\*\d\*1\*[\w\s]+\*\d{2}-\d{2}-\d{4}\*\d$/.test(text)){
+            response=`CON Monthly Salary or Business Profits`
+        }
+        else if(/^4\*1\*\d\*1\*[\w\s]+\*\d{2}-\d{2}-\d{4}\*\d\*\d+$/.test(text)){
+            response=`CON Do you consider yourself to be in good health overall?
+            1.Yes
+            2.No`
+        }
+        else if(/^4\*1\*\d\*1\*[\w\s]+\*\d{2}-\d{2}-\d{4}\*\d\*\d+\*\d$/.test(text)){
+            response=`CON Have you had any major illnesses or surgeries in the past?
+            If yes,please specify and comma separate them
+            If no,submit no`
+        }
+        else if(/^4\*1\*\d\*1\*[\w\s]+\*\d{2}-\d{2}-\d{4}\*\d\*\d+\*\d\*[\w\s]+$/.test(text)){
+            response=`CON Do you have currently have any pre-existing medical conditions?
+            If yes,please specify
+            Example:diabetes,hypertension,heart disease
+            If no,submit no`
+
+        }
+        else if(/^4\*1\*\d\*1\*[\w\s]+\*\d{2}-\d{2}-\d{4}\*\d\*\d+\*\d\*[\w\s]+\*[\w\s]+$/.test(text)){
+            response=`CON Are you currently taking any prescription medications?
+            If yes,list them one by one,comma separated
+            example:Panadol,mara moja
+            If no,submit no`
+        }
+        else if(/^4\*1\*\d\*1\*[\w\s]+\*\d{2}-\d{2}-\d{4}\*\d\*\d+\*\d\*[\w\s]+\*[\w\s]+\[\w\s]+$/.test(text)){
+            response=`CON Have you ever been hospitalised for a medical condition?
+            If yes,provide Details`   
+        }
+        else if(/^4\*1\*\d\*1\*[\w\s]+\*\d{2}-\d{2}-\d{4}\*\d\*\d+\*\d\*[\w\s]+\*[\w\s]+\[\w\s]+\*[\w\s]+$/.test(text)){
+            response=`CON Have you undergone any surgeries in the past?
+            If yes,please sppecify the type and date
+            Example:(Kidney surgery ,22-12-2026),(back surgery,10-12-2025)`
+        }
+        else if(/^4\*1\*\d\*1\*[\w\s]+\*\d{2}-\d{2}-\d{4}\*\d\*\d+\*\d\*[\w\s]+\*[\w\s]+\[\w\s]+\*[\w\s]+\*[\w\s]+$/.test(text)){
+            response=`CON Is there a history of hereditary medical conditions in your immediate family(parents/siblings)?
+            If yes,please specify`
+        }
+        else if(/^4\*1\*\d\*1\*[\w\s]+\*\d{2}-\d{2}-\d{4}\*\d\*\d+\*\d\*[\w\s]+\*[\w\s]+\[\w\s]+\*[\w\s]+\*[\w\s]+\*[\w\s]+$/.test(text)){
+            const [appmenu1,plan,tier,appmenu2,name,dob,gender,salary,goodHealth,illness,medicalCondition,prescription,hospitalised,surgery,hereditaryCondition]=text.split('*');
+            const dataToBeValidated={
+                name,
+                dob,
+                salary,
+                illness,
+                medicalCondition,
+                surgery,
+                hereditaryCondition
+            }
+            const validatedData=await validateData(dataToBeValidated);
+            if(validatedData.length){
+                response='END Your inputs were wrong wrong,check your inbox to see the problem from our message';
+                const smsResponse='';
+                for(let problem of validateData){
+                    smsResponse+=`
+                    ${problem}`;
+                }
+                sendMessage(smsResponse,phoneNumber);
+            }
+            else{
+                response=`CON Enter your 4 digit pin to confirm:`
+            }
         }
 
     }
@@ -155,6 +280,8 @@ app.post('/ussd',async (req,res)=>{
     res.set('Content-Type:text/plain');
     res.send(response);
 })
+app.use('/incoming-messages',require('./incomingMessages'));
+app.use('/inbound-calls',require('./voiceRoute'));
 app.listen(8080,()=>{
-    console.log('ussd running')
+    console.log('ussd running');
 })
